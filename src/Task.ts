@@ -7,8 +7,10 @@ import { getSettings } from './Settings';
 import { Urgency } from './Urgency';
 
 export enum Status {
-    Todo = 'Todo',
-    Done = 'Done',
+    Todo = '1',
+    Done = '2',
+    Blocked = '3',
+    InProgress = '4',
 }
 
 // Sort low below none.
@@ -134,14 +136,9 @@ export class Task {
         const indentation = regexMatch[1];
         const statusString = regexMatch[2].toLowerCase();
 
-        let status: Status;
-        switch (statusString) {
-            case ' ':
-                status = Status.Todo;
-                break;
-            default:
-                status = Status.Done;
-        }
+        const status: Status = this.getStatusFromCharacter({
+            statusString: statusString,
+        });
 
         // match[3] includes the whole body of the task after the brackets.
         const body = regexMatch[3].trim();
@@ -297,6 +294,14 @@ export class Task {
         const textSpan = li.createSpan();
         textSpan.addClass('tasks-list-text');
 
+        if (this.priority === Priority.High) {
+            textSpan.addClass('high-priority');
+        } else if (this.priority === Priority.Medium) {
+            textSpan.addClass('medium-priority');
+        } else if (this.priority === Priority.Low) {
+            textSpan.addClass('low-priority');
+        }
+
         await MarkdownRenderer.renderMarkdown(
             taskAsString,
             textSpan,
@@ -334,10 +339,15 @@ export class Task {
         const checkbox = li.createEl('input');
         checkbox.addClass('task-list-item-checkbox');
         checkbox.type = 'checkbox';
-        if (this.status !== Status.Todo) {
+        if (this.status == Status.Done) {
             checkbox.checked = true;
             li.addClass('is-checked');
+        } else if (this.status == Status.Blocked) {
+            li.addClass('blocked');
+        } else if (this.status == Status.InProgress) {
+            li.addClass('in-progress');
         }
+
         checkbox.onClickEvent((event: MouseEvent) => {
             event.preventDefault();
             // It is required to stop propagation so that obsidian won't write the file with the
@@ -427,9 +437,12 @@ export class Task {
     }
 
     public toFileLineString(): string {
-        return `${this.indentation}- [${
-            this.originalStatusCharacter
-        }] ${this.toString()}`;
+        // Sofiya
+        const character = Task.getCharacterFromStatus({
+            status: this.status,
+        });
+        console.log(this.toString());
+        return `${this.indentation}- [${character}] ${this.toString()}`;
     }
 
     /**
@@ -441,8 +454,9 @@ export class Task {
      * task is not recurring, it will return `[toggled]`.
      */
     public toggle(): Task[] {
+        // Sofiya
         const newStatus: Status =
-            this.status === Status.Todo ? Status.Done : Status.Todo;
+            this.status === Status.Done ? Status.Todo : Status.Done;
 
         let newDoneDate = null;
 
@@ -489,6 +503,44 @@ export class Task {
         newTasks.push(toggledTask);
 
         return newTasks;
+    }
+
+    public static getStatusFromCharacter({
+        statusString,
+    }: {
+        statusString: string;
+    }): Status {
+        switch (statusString) {
+            case ' ':
+                return Status.Todo;
+            case 'b':
+                return Status.Blocked;
+            case 'x':
+                return Status.Done;
+            case '/':
+                return Status.InProgress;
+            default:
+                return Status.Todo;
+        }
+    }
+
+    public static getCharacterFromStatus({
+        status,
+    }: {
+        status: Status;
+    }): string {
+        switch (status) {
+            case Status.Todo:
+                return ' ';
+            case Status.Blocked:
+                return 'b';
+            case Status.Done:
+                return 'x';
+            case Status.InProgress:
+                return '/';
+            default:
+                return ' ';
+        }
     }
 
     public get urgency(): number {

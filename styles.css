@@ -51,3 +51,29 @@
 .tasks-modal-date {
     margin-bottom: 10px;
 }
+
+/* Priority color-coding */
+.high-priority {
+    background-color: #ec61139c;
+}
+
+.medium-priority {
+    background-color: #fdc00099;
+}
+
+.low-priority {
+    background-color: #52b91266;
+}
+
+/* Status styling */
+.blocked {
+    font-weight: 600;
+    opacity: .5;
+    text-decoration: none !important;
+}
+
+.in-progress {
+    font-style: italic;
+    text-decoration: none !important;
+}
+

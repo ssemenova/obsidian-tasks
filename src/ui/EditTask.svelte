@@ -11,7 +11,7 @@
     let descriptionInput: HTMLInputElement;
     let editableTask: {
         description: string;
-        status: Status;
+        status: 'to do' | 'done' | 'blocked' | 'in progress';
         priority: 'none' | 'low' | 'medium' | 'high';
         recurrenceRule: string;
         startDate: string;
@@ -20,7 +20,7 @@
         doneDate: string;
     } = {
         description: '',
-        status: Status.Todo,
+        status: 'to do',
         priority: 'none',
         recurrenceRule: '',
         startDate: '',
@@ -134,9 +134,21 @@
             priority = 'high';
         }
 
+        let status: 'to do' | 'done' | 'blocked' | 'in progress';
+        if (task.status === Status.Todo) {
+            status = 'to do';
+        } else if (task.status === Status.Done) {
+            status = 'done';
+        } else if (task.status === Status.Blocked) {
+            status = 'blocked';
+        } else if (task.status === Status.InProgress) {
+            status = 'in progress';
+        }
+        console.log("status == ", status);
+
         editableTask = {
             description,
-            status: task.status,
+            status: status,
             priority,
             recurrenceRule: task.recurrence ? task.recurrence.toText() : '',
             startDate: task.startDate
@@ -215,20 +227,47 @@
                 parsedPriority = Priority.None;
         }
 
+        let parsedStatus: Status;
+        let newDoneDate = null;
+        switch (editableTask.status) {
+            case 'to do':
+                parsedStatus = Status.Todo;
+                break;
+            case 'done':
+                parsedStatus = Status.Done;
+                newDoneDate = window.moment();
+                break;
+            case 'blocked':
+                parsedStatus = Status.Blocked;
+                break;
+            case 'in progress':
+                parsedStatus = Status.InProgress;
+                break;
+            default:
+                parsedStatus = Status.Todo;
+        }
+
+        let doneDate: Moment;
+        if (!newDoneDate) {
+            doneDate = null;
+        } else if (window.moment(newDoneDate, 'YYYY-MM-DD').isValid()) {
+            doneDate = window.moment(newDoneDate, 'YYYY-MM-DD');
+        } else if (window.moment(editableTask.doneDate, 'YYYY-MM-DD').isValid()) {
+            doneDate = window.moment(editableTask.doneDate, 'YYYY-MM-DD');
+        } else {
+            doneDate = null;
+        }
+
         const updatedTask = new Task({
             ...task,
             description,
-            status: editableTask.status,
+            status: parsedStatus,
             priority: parsedPriority,
             recurrence,
             startDate,
             scheduledDate,
             dueDate,
-            doneDate: window
-                .moment(editableTask.doneDate, 'YYYY-MM-DD')
-                .isValid()
-                ? window.moment(editableTask.doneDate, 'YYYY-MM-DD')
-                : null,
+            doneDate: doneDate
         });
 
         onSubmit([updatedTask]);
@@ -309,13 +348,17 @@
         <hr />
         <div class="tasks-modal-section">
             <div>
-                Status:
-                <input
-                    type="checkbox"
-                    class="task-list-item-checkbox tasks-modal-checkbox"
-                    checked={editableTask.status === Status.Done}
-                    disabled
-                />
+                <label for="status">Status</label>
+                <select
+                    bind:value={editableTask.status}
+                    id="status"
+                    class="dropdown"
+                >
+                    <option value="to do">To Do</option>
+                    <option value="done">Done</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="in progress">In Progress</option>
+                </select>
                 <code>{editableTask.status}</code>
             </div>
             <div>

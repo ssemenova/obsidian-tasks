@@ -203,6 +203,7 @@ class QueryRenderChild extends MarkdownRenderChild {
                     originalTask: task,
                     newTasks: updatedTasks,
                 });
+                console.log(updatedTasks);
             };
 
             // Need to create a new instance every time, as cursor/task can change.
