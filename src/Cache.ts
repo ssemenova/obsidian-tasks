@@ -8,7 +8,7 @@ import {
 } from 'obsidian';
 import { Mutex } from 'async-mutex';
 
-import { Task } from './Task';
+import { Task, TaskBlock } from './Task';
 import type { Events } from './Events';
 
 export enum State {
@@ -27,7 +27,7 @@ export class Cache {
 
     private readonly tasksMutex: Mutex;
     private state: State;
-    private tasks: Task[];
+    private taskblocks: TaskBlock[];
 
     /**
      * We cannot know if this class will be instantiated because obsidian started
@@ -57,7 +57,7 @@ export class Cache {
 
         this.tasksMutex = new Mutex();
         this.state = State.Cold;
-        this.tasks = [];
+        this.taskblocks = [];
 
         this.loadedAfterFirstResolve = false;
 
@@ -82,8 +82,8 @@ export class Cache {
         }
     }
 
-    public getTasks(): Task[] {
-        return this.tasks;
+    public getTasks(): TaskBlock[] {
+        return this.taskblocks;
     }
 
     public getState(): State {
@@ -92,7 +92,7 @@ export class Cache {
 
     private notifySubscribers(): void {
         this.events.triggerCacheUpdate({
-            tasks: this.tasks,
+            taskBlocks: this.taskblocks,
             state: this.state,
         });
     }
@@ -146,8 +146,12 @@ export class Cache {
                 }
 
                 this.tasksMutex.runExclusive(() => {
-                    this.tasks = this.tasks.filter((task: Task) => {
-                        return task.path !== file.path;
+                    // All tasks in a task block will have the same file path
+                    this.taskblocks = this.taskblocks.filter(
+                        (taskBlock: TaskBlock) => {
+                            return taskBlock.tasks.length > 0
+                                ? taskBlock.tasks[0].path !== file.path
+                                : false;
                     });
 
                     this.notifySubscribers();
@@ -164,12 +168,16 @@ export class Cache {
                 }
 
                 this.tasksMutex.runExclusive(() => {
-                    this.tasks = this.tasks.map((task: Task): Task => {
-                        if (task.path === oldPath) {
-                            return new Task({ ...task, path: file.path });
-                        } else {
-                            return task;
+                    // All tasks in a task block will have the same file path
+                    this.taskblocks = this.taskblocks.map((taskBlock: TaskBlock): TaskBlock => {
+                        if (taskBlock.tasks.length > 0 && taskBlock.tasks[0].path === oldPath) {
+                            let newTaskBlock = new TaskBlock();
+                            for (const task of taskBlock.tasks) {
+                                let newTask = new Task({ ...task, path: file.path });
+                                newTaskBlock.tasks.push(newTask);
+                            }
                         }
+                        return taskBlock;
                     });
 
                     this.notifySubscribers();
@@ -181,7 +189,7 @@ export class Cache {
 
     private subscribeToEvents(): void {
         const requestReference = this.events.onRequestCacheUpdate((handler) => {
-            handler({ tasks: this.tasks, state: this.state });
+            handler({ taskBlocks: this.taskblocks, state: this.state });
         });
         this.eventsEventReferences.push(requestReference);
     }
@@ -218,8 +226,12 @@ export class Cache {
 
         // Remove all tasks from this file from the cache before
         // adding the ones that are currently in the file.
-        this.tasks = this.tasks.filter((task: Task) => {
-            return task.path !== file.path;
+        // taskblock.tasks[0] is sufficient here because all tasks
+        // in a task block will be in the same file path
+        this.taskblocks = this.taskblocks.filter((taskblock: TaskBlock) => {
+            return taskblock.tasks.length > 0
+                ? taskblock.tasks[0].path !== file.path
+                : false;
         });
 
         // We want to store section information with every task so
@@ -227,6 +239,9 @@ export class Cache {
         // rendered lists.
         let currentSection: SectionCache | null = null;
         let sectionIndex = 0;
+        let currentID = 0;
+        let newTaskBlock = new TaskBlock();
+        let first = true;
         for (const listItem of listItems) {
             if (listItem.task !== undefined) {
                 if (
@@ -240,10 +255,15 @@ export class Cache {
                         lineNumberTask: listItem.position.start.line,
                         sections: fileCache.sections,
                     });
+                    // Set the ID back to since we are going to a new section
+                    currentID = 0; 
                     sectionIndex = 0;
+                    first = true;
                 }
 
                 if (currentSection === null) {
+                    // Save final taskblock
+                    this.taskblocks.push(newTaskBlock);
                     // Cannot process a task without a section.
                     continue;
                 }
@@ -259,12 +279,34 @@ export class Cache {
                         sections: fileCache.sections,
                         fileLines,
                     }),
+                    id: currentID,
+                    parent: listItem.parent,
                 });
 
                 if (task !== null) {
                     sectionIndex++;
-                    this.tasks.push(task);
+
+                    // If task has no parent, make it a new task block
+                    // and push since we are done processing all children
+                    // If task has no parent but is the first task,
+                    // then it may still have children
+                    if (listItem.parent == -1 && !first) {
+                        this.taskblocks.push(newTaskBlock);
+                        newTaskBlock = new TaskBlock();
+                        newTaskBlock.tasks.push(task);
+                    } else {
+                        // If task has a parent, append it to the old task block
+                        // Doesn't support nested tasks more than 1 level deep
+                        newTaskBlock.tasks.push(task);
+                    }
+
+                    if (listItem == listItems[listItems.length - 1]) {
+                        // If task is last, then save
+                        this.taskblocks.push(newTaskBlock);
+                    }
                 }
+                first = false;
+                currentID += 1;
             }
         }
 

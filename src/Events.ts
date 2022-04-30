@@ -1,7 +1,7 @@
 import type { EventRef, Events as ObsidianEvents } from 'obsidian';
 
 import type { State } from './Cache';
-import type { Task } from './Task';
+import type { TaskBlock } from './Task';
 
 enum Event {
     CacheUpdate = 'obsidian-tasks-plugin:cache-update',
@@ -9,7 +9,7 @@ enum Event {
 }
 
 interface CacheUpdateData {
-    tasks: Task[];
+    taskBlocks: TaskBlock[];
     state: State;
 }
 

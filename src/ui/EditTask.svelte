@@ -144,7 +144,6 @@
         } else if (task.status === Status.InProgress) {
             status = 'in progress';
         }
-        console.log("status == ", status);
 
         editableTask = {
             description,
@@ -359,7 +358,6 @@
                     <option value="blocked">Blocked</option>
                     <option value="in progress">In Progress</option>
                 </select>
-                <code>{editableTask.status}</code>
             </div>
             <div>
                 Done on:

@@ -2,7 +2,8 @@ import * as chrono from 'chrono-node';
 
 import { getSettings } from './Settings';
 import { LayoutOptions } from './LayoutOptions';
-import { Priority, Status, Task } from './Task';
+import { Priority, Status, TaskBlock } from './Task';
+import { Sort } from './Sort';
 
 export type SortingProperty =
     | 'urgency'
@@ -19,7 +20,7 @@ type Sorting = { property: SortingProperty; reverse: boolean };
 export class Query {
     private _limit: number | undefined = undefined;
     private _layoutOptions: LayoutOptions = new LayoutOptions();
-    private _filters: ((task: Task) => boolean)[] = [];
+    private _filters: ((taskBlock: TaskBlock) => boolean)[] = [];
     private _error: string | undefined = undefined;
     private _sorting: Sorting[] = [];
 
@@ -72,33 +73,52 @@ export class Query {
                         break;
                     case line === this.doneString:
                         this._filters.push(
-                            (task) => task.status === Status.Done,
+                            (task) => task.tasks.every(
+                                (task) => task.status === Status.Done)
                         );
                         break;
                     case line === this.notDoneString:
                         this._filters.push(
-                            (task) => task.status !== Status.Done,
+                            (task) => task.tasks.some(
+                                (task) => task.status !== Status.Done)
                         );
                         break;
                     case line === this.recurringString:
-                        this._filters.push((task) => task.recurrence !== null);
+                        // Sofiya: ignore recurrences of subtasks for now
+                        this._filters.push((task) => task.tasks.length > 0 
+                            ? task.tasks[0].recurrence !== null : false);
                         break;
                     case line === this.notRecurringString:
-                        this._filters.push((task) => task.recurrence === null);
+                        // Sofiya: ignore recurrences of subtasks for now
+                        this._filters.push((task) => task.tasks.length > 0 
+                            ? task.tasks[0].recurrence === null : false);
                         break;
                     case line === this.excludeSubItemsString:
-                        this._filters.push((task) => task.indentation === '');
+                        // Sofiya: need to figure this out. How to return only
+                        // top-level task in new task block?
+                        this._filters.push((task) => task.tasks.length > 0 
+                            ? task.tasks[0].indentation === '' : false);
                         break;
                     case line === this.noStartString:
-                        this._filters.push((task) => task.startDate === null);
+                        // Only return true if all tasks and sub-tasks
+                        // don't have start string
+                        this._filters.push((task) => 
+                            task.tasks.every((task) => task.startDate != null)
+                        );
                         break;
                     case line === this.noScheduledString:
-                        this._filters.push(
-                            (task) => task.scheduledDate === null,
+                        this._filters.push((task) => 
+                            // Only return true if all tasks and sub-tasks 
+                            // don't have scheduled string
+                            task.tasks.every((task) => task.scheduledDate != null)
                         );
                         break;
                     case line === this.noDueString:
-                        this._filters.push((task) => task.dueDate === null);
+                        this._filters.push((task) =>
+                            // Only return true if all tasks and sub-tasks 
+                            // don't have due date
+                            task.tasks.every((task) => task.dueDate != null)
+                        );
                         break;
                     case this.shortModeRegexp.test(line):
                         this._layoutOptions.shortMode = true;
@@ -156,7 +176,7 @@ export class Query {
         return this._layoutOptions;
     }
 
-    public get filters(): ((task: Task) => boolean)[] {
+    public get filters(): ((taskBlock: TaskBlock) => boolean)[] {
         return this._filters;
     }
 
@@ -235,18 +255,33 @@ export class Query {
 
             let filter;
             if (priorityMatch[2] === 'above') {
-                filter = (task: Task) =>
-                    task.priority
-                        ? task.priority.localeCompare(filterPriority!) < 0
-                        : false;
+                filter = (tb: TaskBlock) =>
+                    // If there is some task with a priority above the 
+                    // query priority, then include entire block
+                    tb.tasks.some((task) =>
+                        task.priority
+                            ? task.priority.localeCompare(filterPriority!) < 0
+                            : false
+                    );
             } else if (priorityMatch[2] === 'below') {
-                filter = (task: Task) =>
-                    task.priority
-                        ? task.priority.localeCompare(filterPriority!) > 0
-                        : false;
+                filter = (tb: TaskBlock) =>
+                    // If there is some task with a priority above the
+                    // query priority, then EXCLUDE the entire block
+                    !tb.tasks.some((task) =>
+                        task.priority
+                            ? task.priority.localeCompare(filterPriority!) < 0
+                            : false
+                    );
             } else {
-                filter = (task: Task) =>
-                    task.priority ? task.priority === filterPriority : false;
+                filter = (tb: TaskBlock) =>
+                    // If every task priority is above or equal to the 
+                    // query priority, then include the entire block
+                    tb.tasks.every((task) =>
+                        task.priority
+                            ? (task.priority === filterPriority ||
+                                task.priority.localeCompare(filterPriority!) < 0)
+                            : false
+                    );
             }
 
             this._filters.push(filter);
@@ -266,28 +301,40 @@ export class Query {
 
             let filter;
             if (happensMatch[1] === 'before') {
-                filter = (task: Task) => {
-                    return Array.of(
-                        task.startDate,
-                        task.scheduledDate,
-                        task.dueDate,
-                    ).some((date) => date && date.isBefore(filterDate));
+                filter = (tb: TaskBlock) => {
+                    // Happens date of entire block is set to the first
+                    // happens date of the block
+                    return [...tb.tasks].map((task) =>
+                        Array.of(
+                            task.startDate,
+                            task.scheduledDate,
+                            task.dueDate
+                        )
+                    ).flat().some((date) => date && date.isBefore(filterDate));
                 };
             } else if (happensMatch[1] === 'after') {
-                filter = (task: Task) => {
-                    return Array.of(
-                        task.startDate,
-                        task.scheduledDate,
-                        task.dueDate,
-                    ).some((date) => date && date.isAfter(filterDate));
+                filter = (tb: TaskBlock) => {
+                    // Happens date of entire block is set to the first
+                    // happens date of the block
+                    return [...tb.tasks].map((task) =>
+                        Array.of(
+                            task.startDate,
+                            task.scheduledDate,
+                            task.dueDate
+                        )
+                    ).flat().some((date) => date && date.isAfter(filterDate));
                 };
             } else {
-                filter = (task: Task) => {
-                    return Array.of(
-                        task.startDate,
-                        task.scheduledDate,
-                        task.dueDate,
-                    ).some((date) => date && date.isSame(filterDate));
+                filter = (tb: TaskBlock) => {
+                    // Happens date of entire block is set to the first
+                    // happens date of the block
+                    return [...tb.tasks].map((task) =>
+                        Array.of(
+                            task.startDate,
+                            task.scheduledDate,
+                            task.dueDate
+                        )
+                    ).flat().some((date) => date && date.isSame(filterDate));
                 };
             }
 
@@ -308,14 +355,26 @@ export class Query {
 
             let filter;
             if (startMatch[1] === 'before') {
-                filter = (task: Task) =>
-                    task.startDate ? task.startDate.isBefore(filterDate) : true;
+                filter = (tb: TaskBlock) =>
+                    // If any task start date in block is before 
+                    // filter date, then all tasks are
+                    tb.tasks.some((task) => task.startDate
+                        ? task.startDate.isBefore(filterDate)
+                        : true);
             } else if (startMatch[1] === 'after') {
-                filter = (task: Task) =>
-                    task.startDate ? task.startDate.isAfter(filterDate) : true;
+                filter = (tb: TaskBlock) =>
+                    // If any task start date in block is after 
+                    // filter date, then all tasks are
+                    tb.tasks.some((task) => task.startDate
+                        ? task.startDate.isAfter(filterDate)
+                        : true);
             } else {
-                filter = (task: Task) =>
-                    task.startDate ? task.startDate.isSame(filterDate) : true;
+                filter = (tb: TaskBlock) =>
+                    // If any task start date in block has same 
+                    // filter date, then all tasks do
+                    tb.tasks.some((task) => task.startDate
+                        ? task.startDate.isSame(filterDate)
+                        : true);
             }
 
             this._filters.push(filter);
@@ -334,20 +393,23 @@ export class Query {
 
             let filter;
             if (scheduledMatch[1] === 'before') {
-                filter = (task: Task) =>
-                    task.scheduledDate
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are scheduled at the right time
+                    tb.tasks.some((task) => task.scheduledDate
                         ? task.scheduledDate.isBefore(filterDate)
-                        : false;
+                        : false);
             } else if (scheduledMatch[1] === 'after') {
-                filter = (task: Task) =>
-                    task.scheduledDate
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are scheduled at the right time
+                    tb.tasks.some((task) => task.scheduledDate
                         ? task.scheduledDate.isAfter(filterDate)
-                        : false;
+                        : false);
             } else {
-                filter = (task: Task) =>
-                    task.scheduledDate
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are scheduled at the right time
+                    tb.tasks.some((task) => task.scheduledDate
                         ? task.scheduledDate.isSame(filterDate)
-                        : false;
+                        : false);
             }
 
             this._filters.push(filter);
@@ -367,14 +429,23 @@ export class Query {
 
             let filter;
             if (dueMatch[1] === 'before') {
-                filter = (task: Task) =>
-                    task.dueDate ? task.dueDate.isBefore(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are due at the right time
+                    tb.tasks.some((task) => task.dueDate
+                        ? task.dueDate.isBefore(filterDate)
+                        : false);
             } else if (dueMatch[1] === 'after') {
-                filter = (task: Task) =>
-                    task.dueDate ? task.dueDate.isAfter(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are due at the right time
+                    tb.tasks.some((task) => task.dueDate
+                        ? task.dueDate.isAfter(filterDate)
+                        : false);
             } else {
-                filter = (task: Task) =>
-                    task.dueDate ? task.dueDate.isSame(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if any in block are due at the right time
+                    tb.tasks.some((task) => task.dueDate
+                        ? task.dueDate.isSame(filterDate)
+                        : false);
             }
 
             this._filters.push(filter);
@@ -394,14 +465,24 @@ export class Query {
 
             let filter;
             if (doneMatch[1] === 'before') {
-                filter = (task: Task) =>
-                    task.doneDate ? task.doneDate.isBefore(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add parent task and sub-task if the sub-task is 
+                    // done before the date
+                    tb.tasks.every((task) => task.doneDate
+                        ? task.doneDate.isBefore(filterDate)
+                        : false);
             } else if (doneMatch[1] === 'after') {
-                filter = (task: Task) =>
-                    task.doneDate ? task.doneDate.isAfter(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if all in block are done at the right time
+                    tb.tasks.every((task) => task.doneDate
+                        ? task.doneDate.isAfter(filterDate)
+                        : false);
             } else {
-                filter = (task: Task) =>
-                    task.doneDate ? task.doneDate.isSame(filterDate) : false;
+                filter = (tb: TaskBlock) =>
+                    // Add all tasks if all in block are done at the right time
+                    tb.tasks.every((task) => task.doneDate
+                        ? task.doneDate.isSame(filterDate)
+                        : false);
             }
 
             this._filters.push(filter);
@@ -413,14 +494,18 @@ export class Query {
         if (pathMatch !== null) {
             const filterMethod = pathMatch[1];
             if (filterMethod === 'includes') {
-                this._filters.push((task: Task) =>
-                    this.stringIncludesCaseInsensitive(task.path, pathMatch[2]),
+                this._filters.push((tb: TaskBlock) =>
+                    // Paths of all tasks in task block are the same
+                    tb.tasks.length > 0
+                        ? this.stringIncludesCaseInsensitive(tb.tasks[0].path, pathMatch[2])
+                        : false
                 );
             } else if (pathMatch[1] === 'does not include') {
                 this._filters.push(
-                    (task: Task) =>
+                    (tb: TaskBlock) =>
                         !this.stringIncludesCaseInsensitive(
-                            task.path,
+                            // Paths of all tasks in task block are the same
+                            tb.tasks[0].path,
                             pathMatch[2],
                         ),
                 );
@@ -439,25 +524,32 @@ export class Query {
             const globalFilter = getSettings().globalFilter;
 
             if (filterMethod === 'includes') {
-                this._filters.push((task: Task) =>
-                    this.stringIncludesCaseInsensitive(
-                        // Remove global filter from description match if present.
-                        // This is necessary to match only on the content of the task, not
-                        // the global filter.
-                        task.description.replace(globalFilter, '').trim(),
-                        descriptionMatch[2],
-                    ),
-                );
-            } else if (descriptionMatch[1] === 'does not include') {
-                this._filters.push(
-                    (task: Task) =>
-                        !this.stringIncludesCaseInsensitive(
+                this._filters.push((tb: TaskBlock) =>
+                    // If any task in task block matches description filter,
+                    // then include entire block
+                    tb.tasks.some((task) => 
+                        this.stringIncludesCaseInsensitive(
                             // Remove global filter from description match if present.
                             // This is necessary to match only on the content of the task, not
                             // the global filter.
                             task.description.replace(globalFilter, '').trim(),
                             descriptionMatch[2],
-                        ),
+                        )
+                    )
+                );
+            } else if (descriptionMatch[1] === 'does not include') {
+                this._filters.push((tb: TaskBlock) =>
+                    // If any task in task block matches description filter,
+                    // then exclude entire block
+                    !tb.tasks.some((task) =>
+                        this.stringIncludesCaseInsensitive(
+                            // Remove global filter from description match if present.
+                            // This is necessary to match only on the content of the task, not
+                            // the global filter.
+                            task.description.replace(globalFilter, '').trim(),
+                            descriptionMatch[2],
+                        )
+                    )
                 );
             } else {
                 this._error = 'do not understand query filter (description)';
@@ -472,22 +564,28 @@ export class Query {
         if (headingMatch !== null) {
             const filterMethod = headingMatch[1].toLowerCase();
             if (filterMethod === 'includes') {
-                this._filters.push(
-                    (task: Task) =>
+                this._filters.push((tb: TaskBlock) =>
+                    // If any task in task block matches heading filter,
+                    // then include entire block
+                    tb.tasks.some((task) =>
                         task.precedingHeader !== null &&
                         this.stringIncludesCaseInsensitive(
                             task.precedingHeader,
                             headingMatch[2],
-                        ),
+                        )
+                    )
                 );
             } else if (headingMatch[1] === 'does not include') {
-                this._filters.push(
-                    (task: Task) =>
-                        task.precedingHeader === null ||
-                        !this.stringIncludesCaseInsensitive(
+                this._filters.push((tb: TaskBlock) =>
+                    // If any task in task block matches heading filter,
+                    // then exclude entire block
+                    !tb.tasks.some((task) =>
+                        task.precedingHeader !== null &&
+                        this.stringIncludesCaseInsensitive(
                             task.precedingHeader,
                             headingMatch[2],
-                        ),
+                        )
+                    )
                 );
             } else {
                 this._error = 'do not understand query filter (heading)';

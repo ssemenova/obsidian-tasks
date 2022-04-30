@@ -80,6 +80,8 @@ const taskFromLine = ({ line, path }: { line: string; path: string }): Task => {
             sectionIndex: 0,
             precedingHeader: null,
             blockLink: '',
+            id: null,
+            parent: null
         });
     }
 
@@ -112,5 +114,7 @@ const taskFromLine = ({ line, path }: { line: string; path: string }): Task => {
         sectionStart: 0,
         sectionIndex: 0,
         precedingHeader: null,
+        id: null,
+        parent: null
     });
 };

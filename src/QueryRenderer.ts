@@ -13,7 +13,7 @@ import { Query } from './Query';
 import { Sort } from './Sort';
 import { TaskModal } from './TaskModal';
 import type { Events } from './Events';
-import type { Task } from './Task';
+import type { Task, TaskBlock } from './Task';
 
 export class QueryRenderer {
     private readonly app: App;
@@ -118,16 +118,16 @@ class QueryRenderChild extends MarkdownRenderChild {
         }, millisecondsToMidnight + 1000); // Add buffer to be sure to run after midnight.
     }
 
-    private async render({ tasks, state }: { tasks: Task[]; state: State }) {
+    private async render({ taskBlocks, state }: { taskBlocks: TaskBlock[]; state: State }) {
         const content = this.containerEl.createEl('div');
         if (state === State.Warm && this.query.error === undefined) {
-            const tasksSortedLimited = this.applyQueryToTasks(tasks);
-            const { taskList, tasksCount } = await this.createTasksList({
-                tasks: tasksSortedLimited,
+            const tasksSortedLimited = this.applyQueryToTasks(taskBlocks);
+            const { taskList, tbsCount } = await this.createTasksList({
+                tbs: tasksSortedLimited,
                 content: content,
             });
             content.appendChild(taskList);
-            this.addTaskCount(content, tasksCount);
+            this.addTaskCount(content, tbsCount);
         } else if (this.query.error !== undefined) {
             content.setText(`Tasks query: ${this.query.error}`);
         } else {
@@ -138,57 +138,60 @@ class QueryRenderChild extends MarkdownRenderChild {
     }
 
     private async createTasksList({
-        tasks,
+        tbs,
         content,
     }: {
-        tasks: Task[];
+        tbs: TaskBlock[];
         content: HTMLDivElement;
-    }): Promise<{ taskList: HTMLUListElement; tasksCount: number }> {
-        const tasksCount = tasks.length;
+        }): Promise<{ taskList: HTMLUListElement; tbsCount: number }> {
+        const tbsCount = tbs.reduce((count, current) => count + current.tasks.length, 0);
 
         const taskList = content.createEl('ul');
         taskList.addClasses([
             'contains-task-list',
             'plugin-tasks-query-result',
         ]);
-        for (let i = 0; i < tasksCount; i++) {
-            const task = tasks[i];
-            const isFilenameUnique = this.isFilenameUnique({ task });
+        let i = 0;
+        for (const tb of tbs) {
+            for (const task of tb.tasks) {
+                const isFilenameUnique = this.isFilenameUnique({ task });
 
-            const listItem = await task.toLi({
-                parentUlElement: taskList,
-                listIndex: i,
-                layoutOptions: this.query.layoutOptions,
-                isFilenameUnique,
-            });
+                const listItem = await task.toLi({
+                    parentUlElement: taskList,
+                    listIndex: i,
+                    layoutOptions: this.query.layoutOptions,
+                    isFilenameUnique,
+                });
 
-            // Remove all footnotes. They don't re-appear in another document.
-            const footnotes = listItem.querySelectorAll('[data-footnote-id]');
-            footnotes.forEach((footnote) => footnote.remove());
+                // Remove all footnotes. They don't re-appear in another document.
+                const footnotes = listItem.querySelectorAll('[data-footnote-id]');
+                footnotes.forEach((footnote) => footnote.remove());
 
-            const postInfo = listItem.createSpan();
-            const shortMode = this.query.layoutOptions.shortMode;
+                const postInfo = listItem.createSpan();
+                const shortMode = this.query.layoutOptions.shortMode;
 
-            if (!this.query.layoutOptions.hideBacklinks) {
-                this.addBacklinks(postInfo, task, shortMode, isFilenameUnique);
+                if (!this.query.layoutOptions.hideBacklinks) {
+                    this.addBacklinks(postInfo, task, shortMode, isFilenameUnique);
+                }
+
+                if (!this.query.layoutOptions.hideEditButton) {
+                    this.addEditButton(postInfo, task);
+                }
+
+                taskList.appendChild(listItem);
+                i++;
             }
-
-            if (!this.query.layoutOptions.hideEditButton) {
-                this.addEditButton(postInfo, task);
-            }
-
-            taskList.appendChild(listItem);
         }
 
-        return { taskList, tasksCount };
+        return { taskList, tbsCount };
     }
 
-    private applyQueryToTasks(tasks: Task[]) {
+    private applyQueryToTasks(taskBlocks: TaskBlock[]) {
         this.query.filters.forEach((filter) => {
-            tasks = tasks.filter(filter);
+            taskBlocks = taskBlocks.filter(filter);
         });
 
-        return Sort.by(this.query, tasks).slice(0, this.query.limit);
+        return Sort.by(this.query, taskBlocks).slice(0, this.query.limit);
     }
 
     private addEditButton(postInfo: HTMLSpanElement, task: Task) {
@@ -203,7 +206,6 @@ class QueryRenderChild extends MarkdownRenderChild {
                     originalTask: task,
                     newTasks: updatedTasks,
                 });
-                console.log(updatedTasks);
             };
 
             // Need to create a new instance every time, as cursor/task can change.

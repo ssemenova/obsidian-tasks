@@ -7,10 +7,10 @@ import { getSettings } from './Settings';
 import { Urgency } from './Urgency';
 
 export enum Status {
-    Todo = '1',
-    Done = '2',
+    InProgress = '1',
+    Todo = '2',
     Blocked = '3',
-    InProgress = '4',
+    Done = '4',
 }
 
 // Sort low below none.
@@ -19,6 +19,15 @@ export enum Priority {
     Medium = '2',
     None = '3',
     Low = '4',
+}
+
+export class TaskBlock {
+    public tasks: Task[];
+
+    constructor() {
+        let tasks: Task[] = [];
+        this.tasks = tasks;
+    }
 }
 
 export class Task {
@@ -38,6 +47,9 @@ export class Task {
     public readonly precedingHeader: string | null;
 
     public readonly priority: Priority;
+
+    public readonly id: number | null;
+    public readonly parent: number | null;
 
     public readonly startDate: Moment | null;
     public readonly scheduledDate: Moment | null;
@@ -78,6 +90,8 @@ export class Task {
         doneDate,
         recurrence,
         blockLink,
+        id,
+        parent,
     }: {
         status: Status;
         description: string;
@@ -94,6 +108,8 @@ export class Task {
         doneDate: moment.Moment | null;
         recurrence: Recurrence | null;
         blockLink: string;
+        id: number | null;
+        parent: number | null;
     }) {
         this.status = status;
         this.description = description;
@@ -113,6 +129,9 @@ export class Task {
 
         this.recurrence = recurrence;
         this.blockLink = blockLink;
+
+        this.id = id;
+        this.parent = parent;
     }
 
     public static fromLine({
@@ -121,12 +140,16 @@ export class Task {
         sectionStart,
         sectionIndex,
         precedingHeader,
+        id,
+        parent
     }: {
         line: string;
         path: string;
         sectionStart: number;
         sectionIndex: number;
         precedingHeader: string | null;
+        id: number | null;
+        parent: number | null;
     }): Task | null {
         const regexMatch = line.match(Task.taskRegex);
         if (regexMatch === null) {
@@ -265,6 +288,8 @@ export class Task {
             doneDate,
             recurrence,
             blockLink,
+            id: id,
+            parent: parent
         });
 
         return task;
@@ -300,6 +325,11 @@ export class Task {
             textSpan.addClass('medium-priority');
         } else if (this.priority === Priority.Low) {
             textSpan.addClass('low-priority');
+        }
+
+        if (this.indentation.length != 0) {
+            let nestedclass = 'nested' + this.indentation.length;
+            li.addClasses([nestedclass, 'nested']);
         }
 
         await MarkdownRenderer.renderMarkdown(
@@ -441,7 +471,6 @@ export class Task {
         const character = Task.getCharacterFromStatus({
             status: this.status,
         });
-        console.log(this.toString());
         return `${this.indentation}- [${character}] ${this.toString()}`;
     }
 
